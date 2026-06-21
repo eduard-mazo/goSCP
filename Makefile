@@ -92,6 +92,33 @@ build-android: web ## Cross-build embedded binary for Android/Termux (arm64, sta
 	  go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY)-android-arm64 $(PKG)
 	@echo "$(C_GREEN)✓ $(BUILD_DIR)/$(BINARY)-android-arm64 (static, no interpreter)$(C_RST)"
 
+# Native, on-device build INSIDE Termux. Unlike `build-android` (which
+# cross-compiles from a desktop host), this runs Termux's own Go toolchain on
+# the phone, so GOOS/GOARCH are left at the host defaults (android/arm64).
+# CGO is disabled so the result stays self-contained and does not need Termux's
+# clang/NDK at build time or any shared libs at run time. Requires Go in Termux:
+#   pkg install golang
+# The frontend is embedded, so it must be built first; on a phone that is slow,
+# so if you already have internal/assets/dist populated use `build-termux-go`.
+.PHONY: build-termux
+build-termux: web ## Compile natively inside Termux (android/arm64, embeds frontend)
+	@echo "$(C_CYAN)» native Termux build $(BINARY) $(VERSION)$(C_RST)"
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 \
+	  go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) $(PKG)
+	@echo "$(C_GREEN)✓ $(BUILD_DIR)/$(BINARY) (native Termux build)$(C_RST)"
+
+.PHONY: build-termux-go
+build-termux-go: ## Native Termux build, Go only (assumes frontend already built)
+	mkdir -p $(BUILD_DIR)
+	CGO_ENABLED=0 \
+	  go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY) $(PKG)
+	@echo "$(C_GREEN)✓ $(BUILD_DIR)/$(BINARY) (native Termux build)$(C_RST)"
+
+.PHONY: run-termux
+run-termux: build-termux ## Native Termux build + run (vars: ROOT=. PORT=8080)
+	./$(BUILD_DIR)/$(BINARY) --root $(or $(ROOT),.) --port $(or $(PORT),8080)
+
 .PHONY: release
 release: build-linux build-windows build-android ## Build Linux + Windows + Android release binaries
 	@echo "$(C_GREEN)✓ release binaries in $(BUILD_DIR)/$(C_RST)"
