@@ -82,6 +82,19 @@ Then open `http://localhost:8080` in the phone's browser (or reach it from
 another device on the same Wi-Fi via the phone's LAN IP and `--host 0.0.0.0`).
 No `pkg install` is needed — the binary is self-contained.
 
+To share the phone's actual storage (Downloads, DCIM, …), run `termux-setup-storage`
+once and point `--root` at the `~/storage` directory it creates:
+
+```bash
+# in Termux
+termux-setup-storage              # creates ~/storage with links into shared storage
+./goscp-android-arm64 --root ~/storage --port 8080
+```
+
+`~/storage` is a directory of symlinks (e.g. `downloads -> /storage/emulated/0/Download`).
+goSCP follows symlinked entries when listing, so these linked folders show up as
+directories you can browse into — not as opaque files.
+
 > 32-bit (armv7) Termux is not built by default: PIE on 32-bit ARM needs the
 > Android NDK C toolchain. It's a rare configuration; reach for arm64.
 

@@ -90,13 +90,28 @@ func (s *Store) List(rel string) (*Listing, error) {
 		if err != nil {
 			continue // skip entries that vanished mid-listing
 		}
+
+		isDir, size, modTime, mode := de.IsDir(), info.Size(), info.ModTime(), info.Mode()
+
+		// os.ReadDir reports symlinks with Lstat semantics, so a linked
+		// directory would surface as a plain file (IsDir=false) and become
+		// un-navigable. This is the norm on Termux/Android, where ~/storage is
+		// a directory of symlinks into shared storage (e.g. downloads ->
+		// /storage/emulated/0/Download). Follow the link with Stat so the entry
+		// reflects its real target; if the link dangles, keep the Lstat data.
+		if mode&os.ModeSymlink != 0 {
+			if target, terr := os.Stat(filepath.Join(abs, de.Name())); terr == nil {
+				isDir, size, modTime, mode = target.IsDir(), target.Size(), target.ModTime(), target.Mode()
+			}
+		}
+
 		entries = append(entries, Entry{
 			Name:    de.Name(),
 			Path:    path.Join(s.toRel(abs), de.Name()),
-			IsDir:   de.IsDir(),
-			Size:    info.Size(),
-			ModTime: info.ModTime(),
-			Mode:    info.Mode().String(),
+			IsDir:   isDir,
+			Size:    size,
+			ModTime: modTime,
+			Mode:    mode.String(),
 		})
 	}
 
