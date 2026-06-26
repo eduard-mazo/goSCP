@@ -13,11 +13,21 @@ import (
 type API struct {
 	Store          *storage.Store
 	MaxUploadBytes int64
+	// Token is the bearer token clients must present on every guarded route.
+	Token string
+	// Password, when non-empty, lets a client exchange it for Token via
+	// POST /api/v1/token. Empty disables that endpoint.
+	Password string
 }
 
 // New constructs an API.
-func New(store *storage.Store, maxUpload int64) *API {
-	return &API{Store: store, MaxUploadBytes: maxUpload}
+func New(store *storage.Store, maxUpload int64, token, password string) *API {
+	return &API{
+		Store:          store,
+		MaxUploadBytes: maxUpload,
+		Token:          token,
+		Password:       password,
+	}
 }
 
 // errorResponse is the canonical error envelope.

@@ -76,7 +76,11 @@ func banner(cfg *config.Config) {
 	fmt.Printf("│  Root dir  : %-34s│\n", truncate(cfg.Root, 34))
 	fmt.Println("└──────────────────────────────────────────────┘")
 	// Print the token in full on its own line so it is never truncated.
-	fmt.Printf("  Access token: %s\n\n", cfg.Token)
+	fmt.Printf("  Access token: %s\n", cfg.Token)
+	if cfg.Password != "" {
+		fmt.Println("  Password login: enabled (POST /api/v1/token)")
+	}
+	fmt.Println()
 }
 
 func truncate(s string, n int) string {

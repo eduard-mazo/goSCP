@@ -26,7 +26,7 @@ type Server struct {
 // New builds a fully wired Server.
 func New(cfg *config.Config) (*Server, error) {
 	store := storage.New(cfg.Root)
-	a := api.New(store, cfg.MaxUploadBytes)
+	a := api.New(store, cfg.MaxUploadBytes, cfg.Token, cfg.Password)
 
 	mux := http.NewServeMux()
 	a.Routes(mux)
@@ -62,7 +62,11 @@ func tokenGuard(token string) api.Middleware {
 	return func(next http.Handler) http.Handler {
 		protected := guarded(next)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodOptions {
+			// The token-issuing endpoint must stay public — it is how a client
+			// obtains the bearer token in the first place; it enforces its own
+			// password check.
+			public := r.URL.Path == "/api/v1/token"
+			if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodOptions && !public {
 				protected.ServeHTTP(w, r)
 				return
 			}

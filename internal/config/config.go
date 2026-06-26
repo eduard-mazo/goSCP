@@ -26,6 +26,10 @@ type Config struct {
 	// Token is the bearer token required by the API. When empty at startup a
 	// random one is generated and printed to stdout.
 	Token string
+	// Password, when non-empty, enables the POST /api/v1/token endpoint so a
+	// client can exchange this password for the bearer token. Empty disables
+	// password login (clients must supply the token directly).
+	Password string
 	// MaxUploadBytes caps a single multipart upload request.
 	MaxUploadBytes int64
 }
@@ -40,6 +44,7 @@ func Load(args []string) (*Config, error) {
 	addr := fs.String("addr", env("GOSCP_ADDR", ""), "full listen address (overrides --host/--port), e.g. :8080")
 	root := fs.String("root", env("GOSCP_ROOT", "."), "root directory exposed for file exchange")
 	token := fs.String("token", env("GOSCP_TOKEN", ""), "bearer token for API auth (auto-generated if empty)")
+	password := fs.String("password", env("GOSCP_PASSWORD", ""), "enable POST /api/v1/token: exchange this password for the bearer token (disabled if empty)")
 	maxMB := fs.Int64("max-upload-mb", envInt("GOSCP_MAX_UPLOAD_MB", 2048), "maximum upload size per request in MB")
 
 	if err := fs.Parse(args); err != nil {
@@ -79,6 +84,7 @@ func Load(args []string) (*Config, error) {
 		Host:           *host,
 		Root:           absRoot,
 		Token:          tok,
+		Password:       *password,
 		MaxUploadBytes: *maxMB << 20,
 	}, nil
 }

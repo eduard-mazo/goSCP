@@ -61,6 +61,24 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export const api = {
+  /**
+   * Exchange a login password for the bearer token via POST /api/v1/token.
+   * Public endpoint (no Authorization header) — it is how a client obtains the
+   * token. Throws ApiError(404) when password login is disabled on the server.
+   */
+  async requestToken(password: string): Promise<string> {
+    const res = await fetch('/api/v1/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      throw new ApiError(res.status, body?.error ?? res.statusText)
+    }
+    return (body as { token: string }).token
+  },
+
   /** Validate the current token by hitting an authenticated endpoint. */
   async checkAuth(): Promise<boolean> {
     try {

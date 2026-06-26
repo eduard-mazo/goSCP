@@ -1,6 +1,7 @@
 package api
 
 import (
+	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 // Go 1.22+ method-aware pattern routing keeps this dependency-free.
 func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/health", a.handleHealth)
+	mux.HandleFunc("POST /api/v1/token", a.handleToken)
 	mux.HandleFunc("GET /api/v1/usage", a.handleUsage)
 	mux.HandleFunc("GET /api/v1/dirsize", a.handleDirSize)
 	mux.HandleFunc("GET /api/v1/files", a.handleList)
@@ -27,6 +29,32 @@ func (a *API) Routes(mux *http.ServeMux) {
 
 func (a *API) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// tokenRequest is the body of POST /api/v1/token.
+type tokenRequest struct {
+	Password string `json:"password"`
+}
+
+// handleToken exchanges the login password for the API bearer token. It is the
+// only /api route left unauthenticated (see server.tokenGuard) so a client can
+// obtain a token without already holding one. Password login is opt-in: with no
+// --password / GOSCP_PASSWORD configured the endpoint stays disabled.
+func (a *API) handleToken(w http.ResponseWriter, r *http.Request) {
+	if a.Password == "" {
+		writeError(w, http.StatusNotFound, "password login is not enabled")
+		return
+	}
+	var req tokenRequest
+	if err := jsonDecode(r.Body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(req.Password), []byte(a.Password)) != 1 {
+		writeError(w, http.StatusUnauthorized, "invalid password")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"token": a.Token})
 }
 
 func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {
