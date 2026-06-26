@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { api, getToken } from '@/api/client'
 import LoginScreen from '@/components/LoginScreen.vue'
 import FileBrowser from '@/components/FileBrowser.vue'
+import Toaster from '@/components/Toaster.vue'
 
 const authed = ref(false)
 const ready = ref(false)
@@ -21,7 +22,14 @@ onMounted(async () => {
 
 <template>
   <template v-if="ready">
-    <FileBrowser v-if="authed" @logout="authed = false" />
-    <LoginScreen v-else @authenticated="authed = true" />
+    <FileBrowser
+      v-if="authed"
+      @logout="authed = false"
+    />
+    <LoginScreen
+      v-else
+      @authenticated="authed = true"
+    />
   </template>
+  <Toaster />
 </template>

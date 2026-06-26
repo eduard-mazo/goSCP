@@ -16,6 +16,7 @@ import (
 func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/health", a.handleHealth)
 	mux.HandleFunc("GET /api/v1/usage", a.handleUsage)
+	mux.HandleFunc("GET /api/v1/dirsize", a.handleDirSize)
 	mux.HandleFunc("GET /api/v1/files", a.handleList)
 	mux.HandleFunc("GET /api/v1/download", a.handleDownload)
 	mux.HandleFunc("POST /api/v1/upload", a.handleUpload)
@@ -35,6 +36,20 @@ func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, usage)
+}
+
+func (a *API) handleDirSize(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		writeError(w, http.StatusBadRequest, "missing path")
+		return
+	}
+	du, err := a.Store.DirSize(p)
+	if err != nil {
+		a.fsError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, du)
 }
 
 func (a *API) handleList(w http.ResponseWriter, r *http.Request) {

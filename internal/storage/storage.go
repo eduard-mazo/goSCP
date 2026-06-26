@@ -265,3 +265,38 @@ func (s *Store) Usage() (*DiskUsage, error) {
 	})
 	return du, err
 }
+
+// DirSize recursively tallies the total byte size and entry counts beneath a
+// single path. Directory listings deliberately omit recursive sizes to stay
+// fast on large trees; the frontend calls this lazily, per folder, instead.
+func (s *Store) DirSize(rel string) (*DiskUsage, error) {
+	abs, err := s.resolve(rel)
+	if err != nil {
+		return nil, err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return nil, err
+	}
+	du := &DiskUsage{Root: s.toRel(abs)}
+	if !info.IsDir() {
+		du.TotalSize = info.Size()
+		du.FileCount = 1
+		return du, nil
+	}
+	err = filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
+		if err != nil || p == abs {
+			return nil // ignore unreadable entries and the directory itself
+		}
+		if d.IsDir() {
+			du.DirCount++
+			return nil
+		}
+		du.FileCount++
+		if fi, e := d.Info(); e == nil {
+			du.TotalSize += fi.Size()
+		}
+		return nil
+	})
+	return du, err
+}

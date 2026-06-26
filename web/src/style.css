@@ -2,52 +2,178 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  goSCP — "transfer console"
+  A terminal-heritage palette: warm ink & paper neutrals with a single amber
+  signal accent. Metadata (sizes, permissions, paths) is rendered in monospace
+  to evoke the SCP/SSH lineage without relying on any network fonts.
+*/
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Light — warm paper */
+    --background: 40 33% 97%;
+    --foreground: 28 22% 14%;
     --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
+    --card-foreground: 28 22% 14%;
+    --popover: 40 33% 98%;
+    --popover-foreground: 28 22% 14%;
+    --primary: 32 95% 44%;
+    --primary-foreground: 40 60% 98%;
+    --secondary: 36 24% 92%;
+    --secondary-foreground: 28 22% 18%;
+    --muted: 36 22% 93%;
+    --muted-foreground: 30 9% 42%;
+    --accent: 36 40% 91%;
+    --accent-foreground: 28 30% 16%;
+    --destructive: 0 72% 46%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 152 55% 36%;
+    --border: 34 18% 87%;
+    --input: 34 18% 84%;
+    --ring: 32 95% 44%;
+    --radius: 0.65rem;
+
+    /* Ambient backdrop tints */
+    --grid-line: 28 20% 50%;
+    --glow: 38 95% 55%;
+
+    color-scheme: light;
   }
 
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    /* Dark — warm ink */
+    --background: 30 12% 6%;
+    --foreground: 38 18% 90%;
+    --card: 28 11% 9%;
+    --card-foreground: 38 18% 90%;
+    --popover: 28 12% 8%;
+    --popover-foreground: 38 18% 90%;
+    --primary: 38 96% 56%;
+    --primary-foreground: 30 40% 8%;
+    --secondary: 28 9% 15%;
+    --secondary-foreground: 38 18% 90%;
+    --muted: 28 8% 14%;
+    --muted-foreground: 36 9% 60%;
+    --accent: 30 10% 16%;
+    --accent-foreground: 38 22% 92%;
+    --destructive: 2 70% 56%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 150 50% 52%;
+    --border: 30 8% 17%;
+    --input: 30 8% 20%;
+    --ring: 38 96% 56%;
+
+    --grid-line: 40 30% 70%;
+    --glow: 38 95% 55%;
+
+    color-scheme: dark;
   }
 
   * {
     @apply border-border;
   }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    min-height: 100dvh;
+  }
+
+  /*
+    Ambient backdrop: a faint dot grid plus a soft amber glow anchored to the
+    top — atmosphere without weight. Fixed so it never scrolls.
+  */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background-image:
+      radial-gradient(
+        120% 80% at 50% -10%,
+        hsl(var(--glow) / 0.1),
+        transparent 60%
+      ),
+      radial-gradient(
+        hsl(var(--grid-line) / 0.06) 1px,
+        transparent 1px
+      );
+    background-size: 100% 100%, 22px 22px;
+    background-position: center top, center;
+  }
+
+  /* Console-flavoured scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--muted-foreground) / 0.3);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.5);
+  }
+
+  /* Visible, on-brand focus ring for keyboard users */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@layer utilities {
+  /* Tracked, uppercase monospace label — the "terminal tag" motif */
+  .label-mono {
+    @apply font-mono text-[0.68rem] font-medium uppercase tracking-[0.18em];
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* Staggered row reveal for directory listings */
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.row-in {
+  animation: row-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
   }
 }

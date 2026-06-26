@@ -23,6 +23,9 @@ export interface Usage {
   dirCount: number
 }
 
+/** Progress callback for uploads: 0..1, plus byte counts. */
+export type ProgressFn = (ratio: number, loaded: number, total: number) => void
+
 const TOKEN_KEY = 'goscp.token'
 
 export function getToken(): string {
@@ -71,6 +74,10 @@ export const api = {
 
   usage: () => request<Usage>('/usage'),
 
+  /** Recursively computed size + counts for a single directory (or file). */
+  dirSize: (path: string) =>
+    request<Usage>(`/dirsize?path=${encodeURIComponent(path)}`),
+
   list: (path: string) =>
     request<Listing>(`/files?path=${encodeURIComponent(path)}`),
 
@@ -110,19 +117,40 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
-  /** Upload one or more files into the given directory. */
-  async upload(dir: string, files: FileList | File[]): Promise<void> {
-    const form = new FormData()
-    form.append('path', dir)
-    for (const f of Array.from(files)) form.append('files', f)
-    const res = await fetch('/api/v1/upload', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${getToken()}` },
-      body: form,
+  /**
+   * Upload one or more files into the given directory. Uses XHR (not fetch) so
+   * we can surface real upload progress to the UI.
+   */
+  upload(dir: string, files: FileList | File[], onProgress?: ProgressFn): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const form = new FormData()
+      form.append('path', dir)
+      for (const f of Array.from(files)) form.append('files', f)
+
+      const xhr = new XMLHttpRequest()
+      xhr.open('POST', '/api/v1/upload')
+      xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`)
+
+      xhr.upload.onprogress = (e) => {
+        if (onProgress && e.lengthComputable) {
+          onProgress(e.loaded / e.total, e.loaded, e.total)
+        }
+      }
+      xhr.onerror = () => reject(new ApiError(0, 'network error during upload'))
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve()
+          return
+        }
+        let msg = 'upload failed'
+        try {
+          msg = JSON.parse(xhr.responseText)?.error ?? msg
+        } catch {
+          /* non-JSON error body */
+        }
+        reject(new ApiError(xhr.status, msg))
+      }
+      xhr.send(form)
     })
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}))
-      throw new ApiError(res.status, body?.error ?? 'upload failed')
-    }
   },
 }
