@@ -2,6 +2,7 @@ package api
 
 import (
 	"crypto/subtle"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -62,6 +63,21 @@ type statusRecorder struct {
 func (sr *statusRecorder) WriteHeader(code int) {
 	sr.status = code
 	sr.ResponseWriter.WriteHeader(code)
+}
+
+// ReadFrom forwards to the wrapped writer's io.ReaderFrom so io.Copy (used by
+// http.ServeContent for downloads) keeps the kernel sendfile fast path instead
+// of shuttling every byte of a large file through a 32 KiB user-space buffer.
+func (sr *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
+	if rf, ok := sr.ResponseWriter.(io.ReaderFrom); ok {
+		return rf.ReadFrom(src)
+	}
+	return io.Copy(sr.ResponseWriter, src)
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (sr *statusRecorder) Unwrap() http.ResponseWriter {
+	return sr.ResponseWriter
 }
 
 // Logger writes a concise access log line per request.

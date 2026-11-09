@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"strconv"
 
 	"goscp/internal/storage"
 )
@@ -21,6 +20,7 @@ func (a *API) Routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/dirsize", a.handleDirSize)
 	mux.HandleFunc("GET /api/v1/files", a.handleList)
 	mux.HandleFunc("GET /api/v1/download", a.handleDownload)
+	mux.HandleFunc("GET /api/v1/download/link", a.handleDownloadLink)
 	mux.HandleFunc("POST /api/v1/upload", a.handleUpload)
 	mux.HandleFunc("POST /api/v1/mkdir", a.handleMkdir)
 	mux.HandleFunc("POST /api/v1/rename", a.handleRename)
@@ -91,24 +91,6 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, listing)
-}
-
-func (a *API) handleDownload(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Query().Get("path")
-	if p == "" {
-		writeError(w, http.StatusBadRequest, "missing path")
-		return
-	}
-	f, info, err := a.Store.Open(p)
-	if err != nil {
-		a.fsError(w, err)
-		return
-	}
-	defer f.Close()
-
-	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(info.Name()))
-	http.ServeContent(w, r, info.Name(), info.ModTime(), f)
 }
 
 func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {

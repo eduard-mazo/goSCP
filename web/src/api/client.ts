@@ -118,21 +118,24 @@ export const api = {
       method: 'DELETE',
     }),
 
-  /** Build a download URL with the token embedded as a header via fetch. */
+  /**
+   * Start a native browser download. We fetch a short-lived signed URL (the
+   * bearer token never goes in a URL) and point the browser at it, so the save
+   * dialog / mobile prompt appears immediately and the file streams straight to
+   * disk with the browser's own progress and resume, instead of being buffered
+   * into a Blob in memory first.
+   */
   async download(path: string, name: string): Promise<void> {
-    const res = await fetch(`/api/v1/download?path=${encodeURIComponent(path)}`, {
-      headers: { Authorization: `Bearer ${getToken()}` },
-    })
-    if (!res.ok) throw new ApiError(res.status, 'download failed')
-    const blob = await res.blob()
-    const url = URL.createObjectURL(blob)
+    const { url } = await request<{ url: string }>(
+      `/download/link?path=${encodeURIComponent(path)}`,
+    )
     const a = document.createElement('a')
     a.href = url
     a.download = name
+    a.rel = 'noopener'
     document.body.appendChild(a)
     a.click()
     a.remove()
-    URL.revokeObjectURL(url)
   },
 
   /**

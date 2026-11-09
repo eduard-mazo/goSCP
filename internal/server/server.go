@@ -42,7 +42,7 @@ func New(cfg *config.Config) (*Server, error) {
 	handler := api.Chain(mux,
 		api.Logger,
 		api.CORS,
-		tokenGuard(cfg.Token),
+		tokenGuard(cfg.Token, a.SignedDownload),
 	)
 
 	return &Server{
@@ -56,8 +56,10 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 // tokenGuard applies bearer-token auth to /api routes only; static assets and
-// the SPA shell stay public so the login screen itself can load.
-func tokenGuard(token string) api.Middleware {
+// the SPA shell stay public so the login screen itself can load. Requests that
+// signed(r) vouches for (a valid signed download link) skip the bearer check so
+// the browser can download natively, without an Authorization header.
+func tokenGuard(token string, signed func(*http.Request) bool) api.Middleware {
 	guarded := api.RequireToken(token)
 	return func(next http.Handler) http.Handler {
 		protected := guarded(next)
@@ -65,7 +67,7 @@ func tokenGuard(token string) api.Middleware {
 			// The token-issuing endpoint must stay public — it is how a client
 			// obtains the bearer token in the first place; it enforces its own
 			// password check.
-			public := r.URL.Path == "/api/v1/token"
+			public := r.URL.Path == "/api/v1/token" || signed(r)
 			if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodOptions && !public {
 				protected.ServeHTTP(w, r)
 				return

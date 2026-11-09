@@ -18,6 +18,9 @@ type API struct {
 	// Password, when non-empty, lets a client exchange it for Token via
 	// POST /api/v1/token. Empty disables that endpoint.
 	Password string
+
+	// downloadKey signs short-lived download links (see download.go).
+	downloadKey []byte
 }
 
 // New constructs an API.
@@ -27,6 +30,7 @@ func New(store *storage.Store, maxUpload int64, token, password string) *API {
 		MaxUploadBytes: maxUpload,
 		Token:          token,
 		Password:       password,
+		downloadKey:    downloadKey(token),
 	}
 }
 
