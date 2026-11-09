@@ -175,7 +175,8 @@ ssh root@192.168.1.1 'chmod +x /etc/init.d/goscp && /etc/init.d/goscp start'
 ## API
 
 All endpoints live under `/api/v1` and require `Authorization: Bearer <token>`,
-except `POST /token`, which is public (it's how a client obtains the token).
+except `POST /token`, which is public (it's how a client obtains the token), and
+`GET /download` when it carries a valid signed-link signature (see below).
 
 | Method   | Path          | Description                          |
 |----------|---------------|--------------------------------------|
@@ -184,11 +185,23 @@ except `POST /token`, which is public (it's how a client obtains the token).
 | `GET`    | `/usage`      | Root statistics (counts, total size) |
 | `GET`    | `/dirsize?path=` | Recursive size + counts for one directory |
 | `GET`    | `/files?path=`| List a directory                     |
-| `GET`    | `/download?path=` | Stream a file                    |
+| `GET`    | `/download?path=` | Stream a file (supports `Range` for resume) |
+| `GET`    | `/download/link?path=` | Issue a signed, 1-hour download URL for one file |
 | `POST`   | `/upload`     | Multipart upload (`path`, `files[]`) |
 | `POST`   | `/mkdir`      | `{ "path", "name" }`                 |
 | `POST`   | `/rename`     | `{ "path", "name" }`                 |
 | `DELETE` | `/files?path=`| Delete a file/folder                 |
+
+### Downloads
+
+The web UI never buffers a download in memory. It asks `GET /download/link` for
+a short-lived URL that is scoped to one file and signed with HMAC
+(`/api/v1/download?path=…&exp=…&sig=…`), then points the browser at it. The
+browser's own download manager streams the file to disk, so the save dialog or
+mobile prompt appears as soon as the response headers arrive, even for
+multi-GB files. The bearer token never appears in the URL. Links stop working
+after an hour or when the token changes. A transfer that has already started
+keeps going after the link expires.
 
 ## Project layout
 
