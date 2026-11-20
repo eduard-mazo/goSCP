@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   CornerLeftUp, Download, Trash2, FolderPlus, Upload, RefreshCw,
   Folder, Pencil, LogOut, HardDrive, Loader2, ChevronRight,
@@ -78,45 +78,82 @@ function setSort(key: SortKey) {
   }
 }
 
+// Recursive walks (root usage, folder sizes) can take minutes on a big tree
+// such as --root /. They must never block the listing, and they must be
+// aborted once stale: browsers allow only ~6 HTTP/1.1 connections per host, so
+// abandoned walks would otherwise starve list, upload and download requests.
+// Aborting also cancels the walk server-side.
+let dirSizeAbort: AbortController | null = null
+let usageAbort: AbortController | null = null
+const usageLoading = ref(false)
+
 async function load(path = cwd.value) {
   loading.value = true
   error.value = ''
   const gen = ++loadGen
+  dirSizeAbort?.abort()
+  dirSizeAbort = null
   dirSizes.value = new Map()
   dirSizeLoading.value = new Set()
   try {
-    const [l, u] = await Promise.all([api.list(path), api.usage()])
+    const l = await api.list(path)
     if (gen !== loadGen) return
     listing.value = l
-    usage.value = u
-    void loadDirSizes(l.entries, gen)
+    dirSizeAbort = new AbortController()
+    void loadDirSizes(l.entries, gen, dirSizeAbort.signal)
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to load directory'
+    if (gen === loadGen) error.value = e instanceof Error ? e.message : 'Failed to load directory'
   } finally {
     if (gen === loadGen) loading.value = false
   }
 }
 
-// Fetch folder sizes a few at a time so listings stay snappy and we never
-// flood the backend with one request per subtree at once.
-async function loadDirSizes(entries: Entry[], gen: number) {
+// Root-wide stats, fetched in the background. Only the newest request counts;
+// starting a new one aborts the previous walk.
+async function refreshUsage() {
+  usageAbort?.abort()
+  const ctrl = new AbortController()
+  usageAbort = ctrl
+  usageLoading.value = true
+  try {
+    usage.value = await api.usage(ctrl.signal)
+  } catch {
+    /* aborted or failed — keep the last known stats */
+  } finally {
+    if (usageAbort === ctrl) {
+      usageAbort = null
+      usageLoading.value = false
+    }
+  }
+}
+
+// Reload the listing after a change, and recount root stats in the background.
+function reloadAfterChange() {
+  void refreshUsage()
+  return load()
+}
+
+// Fetch folder sizes two at a time so listings stay snappy, the backend is
+// not flooded with one walk per subtree, and connections remain free for
+// navigation, uploads and downloads.
+async function loadDirSizes(entries: Entry[], gen: number, signal: AbortSignal) {
   const dirs = entries.filter((e) => e.isDir)
   let i = 0
   const worker = async () => {
-    while (i < dirs.length && gen === loadGen) {
+    while (i < dirs.length && gen === loadGen && !signal.aborted) {
       const e = dirs[i++]
       dirSizeLoading.value.add(e.path)
       try {
-        const u = await api.dirSize(e.path)
+        const u = await api.dirSize(e.path, signal)
         if (gen === loadGen) dirSizes.value.set(e.path, u)
       } catch {
-        /* leave size unknown */
+        /* aborted or failed — leave size unknown */
       } finally {
         dirSizeLoading.value.delete(e.path)
       }
     }
   }
-  await Promise.all(Array.from({ length: 4 }, worker))
+  await Promise.all(Array.from({ length: 2 }, worker))
 }
 
 function open(entry: Entry) {
@@ -169,7 +206,7 @@ async function confirmDialog() {
       toast.success(`Deleted “${d.entry.name}”`)
     }
     dialog.value = null
-    await load()
+    await reloadAfterChange()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : 'Operation failed')
     if (dialog.value) dialog.value.busy = false
@@ -189,7 +226,8 @@ async function doUpload(files: FileList | File[]) {
       uploadInfo.value = `${formatBytes(loaded)} / ${formatBytes(total)}`
     })
     toast.success(`Uploaded ${list.length} ${list.length === 1 ? 'file' : 'files'}`)
-    await load()
+    uploading.value = false
+    await reloadAfterChange()
   } catch (e) {
     toast.error(e instanceof Error ? e.message : 'Upload failed')
   } finally {
@@ -226,7 +264,17 @@ function dirCountLabel(entry: Entry): string {
   return u.dirCount ? `${f}, ${u.dirCount} ${u.dirCount === 1 ? 'folder' : 'folders'}` : f
 }
 
-onMounted(() => load('/'))
+onMounted(() => {
+  void load('/')
+  void refreshUsage()
+})
+
+// Logging out unmounts the browser: stop any walks still running.
+onBeforeUnmount(() => {
+  loadGen++
+  dirSizeAbort?.abort()
+  usageAbort?.abort()
+})
 </script>
 
 <template>
@@ -261,12 +309,23 @@ onMounted(() => load('/'))
           <div
             v-if="usage"
             class="mr-1 hidden items-center gap-3 rounded-lg border bg-card/60 px-3 py-1.5 font-mono text-xs text-muted-foreground md:flex"
+            :title="usageLoading ? 'Recounting…' : undefined"
           >
+            <Loader2
+              v-if="usageLoading"
+              class="h-3.5 w-3.5 animate-spin"
+            />
             <span class="flex items-center gap-1.5"><Server class="h-3.5 w-3.5" />{{ usage.fileCount }}</span>
             <span class="text-border">·</span>
             <span class="flex items-center gap-1.5"><Folder class="h-3.5 w-3.5" />{{ usage.dirCount }}</span>
             <span class="text-border">·</span>
             <span class="font-semibold text-foreground">{{ formatBytes(usage.totalSize) }}</span>
+          </div>
+          <div
+            v-else-if="usageLoading"
+            class="mr-1 hidden items-center gap-2 rounded-lg border bg-card/60 px-3 py-1.5 font-mono text-xs text-muted-foreground md:flex"
+          >
+            <Loader2 class="h-3.5 w-3.5 animate-spin" /> Scanning root…
           </div>
           <ThemeToggle />
           <Button
@@ -338,7 +397,7 @@ onMounted(() => load('/'))
             size="sm"
             :disabled="loading"
             title="Refresh"
-            @click="load()"
+            @click="reloadAfterChange()"
           >
             <RefreshCw :class="cn(loading && 'animate-spin')" /> <span class="hidden sm:inline">Refresh</span>
           </Button>

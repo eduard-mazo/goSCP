@@ -4,6 +4,8 @@
 package storage
 
 import (
+	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -172,23 +174,46 @@ func (s *Store) Open(rel string) (*os.File, os.FileInfo, error) {
 	return f, info, nil
 }
 
-// Save writes r to a new file named name inside the directory dir.
+// Save streams r into a file named name inside the directory dir.
+//
+// The data goes to a hidden temporary file beside the destination and is only
+// renamed into place once r is fully drained. So an aborted or failed upload
+// never leaves a truncated file under the real name, and never clobbers an
+// existing file. Writing in the destination directory (not os.TempDir) keeps
+// the final rename atomic and avoids spooling the upload through /tmp, which
+// is RAM-backed tmpfs on many distros.
 func (s *Store) Save(dir, name string, r io.Reader) (*Entry, error) {
-	if name == "" || strings.ContainsAny(name, `/\`) {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
 		return nil, fmt.Errorf("invalid file name %q", name)
 	}
 	abs, err := s.resolve(path.Join(dir, name))
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(abs, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
+	// O_EXCL with a random name instead of os.CreateTemp so the file gets the
+	// usual 0644-minus-umask mode, exactly like a directly created file.
+	tmpPath := filepath.Join(filepath.Dir(abs), ".goscp-upload-"+rand.Text()+".part")
+	f, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	committed := false
+	defer func() {
+		if !committed {
+			f.Close()
+			os.Remove(tmpPath)
+		}
+	}()
 	if _, err := io.Copy(f, r); err != nil {
 		return nil, err
 	}
+	if err := f.Close(); err != nil {
+		return nil, err
+	}
+	if err := os.Rename(tmpPath, abs); err != nil {
+		return nil, err
+	}
+	committed = true
 	return s.Stat(s.toRel(abs))
 }
 
@@ -246,10 +271,15 @@ type DiskUsage struct {
 	DirCount  int    `json:"dirCount"`
 }
 
-// Usage walks the root and tallies basic statistics.
-func (s *Store) Usage() (*DiskUsage, error) {
+// Usage walks the root and tallies basic statistics. On a large tree (e.g.
+// --root /) this can take minutes, so the walk stops with ctx.Err() as soon as
+// ctx is cancelled — typically because the client navigated away.
+func (s *Store) Usage(ctx context.Context) (*DiskUsage, error) {
 	du := &DiskUsage{Root: s.Root}
 	err := filepath.WalkDir(s.Root, func(_ string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return nil // ignore unreadable entries
 		}
@@ -269,7 +299,8 @@ func (s *Store) Usage() (*DiskUsage, error) {
 // DirSize recursively tallies the total byte size and entry counts beneath a
 // single path. Directory listings deliberately omit recursive sizes to stay
 // fast on large trees; the frontend calls this lazily, per folder, instead.
-func (s *Store) DirSize(rel string) (*DiskUsage, error) {
+// Like Usage, it aborts with ctx.Err() once ctx is cancelled.
+func (s *Store) DirSize(ctx context.Context, rel string) (*DiskUsage, error) {
 	abs, err := s.resolve(rel)
 	if err != nil {
 		return nil, err
@@ -285,6 +316,9 @@ func (s *Store) DirSize(rel string) (*DiskUsage, error) {
 		return du, nil
 	}
 	err = filepath.WalkDir(abs, func(p string, d os.DirEntry, err error) error {
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
+		}
 		if err != nil || p == abs {
 			return nil // ignore unreadable entries and the directory itself
 		}

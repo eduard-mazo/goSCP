@@ -1,12 +1,14 @@
 package api
 
 import (
+	"context"
 	"crypto/subtle"
 	"errors"
 	"io"
 	"net/http"
 	"os"
 	"path"
+	"strings"
 
 	"goscp/internal/storage"
 )
@@ -57,9 +59,12 @@ func (a *API) handleToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"token": a.Token})
 }
 
-func (a *API) handleUsage(w http.ResponseWriter, _ *http.Request) {
-	usage, err := a.Store.Usage()
+func (a *API) handleUsage(w http.ResponseWriter, r *http.Request) {
+	usage, err := a.Store.Usage(r.Context())
 	if err != nil {
+		if clientGone(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -72,8 +77,11 @@ func (a *API) handleDirSize(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "missing path")
 		return
 	}
-	du, err := a.Store.DirSize(p)
+	du, err := a.Store.DirSize(r.Context(), p)
 	if err != nil {
+		if clientGone(w, err) {
+			return
+		}
 		a.fsError(w, err)
 		return
 	}
@@ -93,39 +101,94 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listing)
 }
 
+// handleUpload streams a multipart upload straight into the target directory.
+//
+// It deliberately avoids r.ParseMultipartForm: that spools every file larger
+// than its memory budget to os.TempDir() first and only then lets us copy it
+// to the destination. On a multi-GB upload that means a full extra write after
+// the client already shows 100% (the UI looks frozen) and, where /tmp is
+// tmpfs, holding the whole file in RAM. Reading parts one at a time with
+// MultipartReader writes each file to disk as its bytes arrive.
+//
+// The target directory comes from the ?path= query parameter or a "path" form
+// field; a form field only applies to the files that follow it, so it must
+// precede them (browsers and curl -F keep fields in the order given).
 func (a *API) handleUpload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, a.MaxUploadBytes)
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeError(w, http.StatusBadRequest, "upload too large or malformed: "+err.Error())
+	// Refuse an oversized upload up front instead of after receiving it.
+	if r.ContentLength > a.MaxUploadBytes {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds the server limit")
 		return
 	}
-	dir := r.FormValue("path")
-	if dir == "" {
-		dir = "/"
+	r.Body = http.MaxBytesReader(w, r.Body, a.MaxUploadBytes)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "expected a multipart/form-data upload: "+err.Error())
+		return
 	}
 
-	files := r.MultipartForm.File["files"]
-	if len(files) == 0 {
+	dir := r.URL.Query().Get("path")
+	saved := make([]*storage.Entry, 0, 1)
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			a.uploadError(w, err)
+			return
+		}
+		switch name := part.FormName(); {
+		case name == "path" && part.FileName() == "":
+			b, err := io.ReadAll(io.LimitReader(part, 4096))
+			if err != nil {
+				a.uploadError(w, err)
+				return
+			}
+			dir = strings.TrimSpace(string(b))
+		case name == "files" && part.FileName() != "":
+			if dir == "" {
+				dir = "/"
+			}
+			entry, err := a.Store.Save(dir, path.Base(part.FileName()), part)
+			if err != nil {
+				a.uploadError(w, err)
+				return
+			}
+			saved = append(saved, entry)
+		}
+		part.Close()
+	}
+
+	if len(saved) == 0 {
 		writeError(w, http.StatusBadRequest, "no files provided (field name: files)")
 		return
 	}
-
-	saved := make([]*storage.Entry, 0, len(files))
-	for _, fh := range files {
-		src, err := fh.Open()
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		entry, err := a.Store.Save(dir, path.Base(fh.Filename), src)
-		src.Close()
-		if err != nil {
-			a.fsError(w, err)
-			return
-		}
-		saved = append(saved, entry)
-	}
 	writeJSON(w, http.StatusCreated, map[string]any{"saved": saved})
+}
+
+// uploadError maps a failure while streaming an upload to a response.
+func (a *API) uploadError(w http.ResponseWriter, err error) {
+	var tooBig *http.MaxBytesError
+	if errors.As(err, &tooBig) {
+		writeError(w, http.StatusRequestEntityTooLarge, "upload exceeds the server limit")
+		return
+	}
+	a.fsError(w, err)
+}
+
+// statusClientClosed is the de facto (nginx) code for "client closed the
+// request". Nobody receives it; it only makes abandoned walks legible in the
+// access log instead of being logged as a 200.
+const statusClientClosed = 499
+
+// clientGone reports whether err is the request context being cancelled (the
+// browser aborted or navigated away) and, if so, records that status.
+func clientGone(w http.ResponseWriter, err error) bool {
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	w.WriteHeader(statusClientClosed)
+	return true
 }
 
 type nameRequest struct {

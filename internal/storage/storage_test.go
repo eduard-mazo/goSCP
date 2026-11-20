@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,5 +68,35 @@ func TestListDanglingSymlink(t *testing.T) {
 	}
 	if listing.Entries[0].IsDir {
 		t.Fatalf("dangling symlink should not be reported as a directory")
+	}
+}
+
+// A cancelled context (the client navigated away) must stop a recursive walk
+// instead of letting it run to completion on a large tree.
+func TestWalksStopOnCancel(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "a", "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a", "b", "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(root)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if _, err := s.Usage(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Usage err = %v, want context.Canceled", err)
+	}
+	if _, err := s.DirSize(ctx, "/a"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("DirSize err = %v, want context.Canceled", err)
+	}
+
+	du, err := s.DirSize(context.Background(), "/a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if du.FileCount != 1 || du.DirCount != 1 || du.TotalSize != 1 {
+		t.Fatalf("DirSize = %+v", du)
 	}
 }

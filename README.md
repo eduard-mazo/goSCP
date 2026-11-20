@@ -187,7 +187,7 @@ except `POST /token`, which is public (it's how a client obtains the token), and
 | `GET`    | `/files?path=`| List a directory                     |
 | `GET`    | `/download?path=` | Stream a file (supports `Range` for resume) |
 | `GET`    | `/download/link?path=` | Issue a signed, 1-hour download URL for one file |
-| `POST`   | `/upload`     | Multipart upload (`path`, `files[]`) |
+| `POST`   | `/upload?path=` | Multipart upload (`files[]`), streamed straight to disk; `path` may also be a form field placed before the files |
 | `POST`   | `/mkdir`      | `{ "path", "name" }`                 |
 | `POST`   | `/rename`     | `{ "path", "name" }`                 |
 | `DELETE` | `/files?path=`| Delete a file/folder                 |

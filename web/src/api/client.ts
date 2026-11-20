@@ -79,10 +79,13 @@ export const api = {
     return (body as { token: string }).token
   },
 
-  /** Validate the current token by hitting an authenticated endpoint. */
+  /**
+   * Validate the current token by hitting a cheap authenticated endpoint. Not
+   * /usage: that walks the whole root and can take minutes on a big tree.
+   */
   async checkAuth(): Promise<boolean> {
     try {
-      await request('/usage')
+      await request('/health')
       return true
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) return false
@@ -90,11 +93,16 @@ export const api = {
     }
   },
 
-  usage: () => request<Usage>('/usage'),
+  /**
+   * Root-wide statistics. Slow on large trees (full recursive walk), so callers
+   * should never block rendering on it; aborting the signal also stops the walk
+   * on the server.
+   */
+  usage: (signal?: AbortSignal) => request<Usage>('/usage', { signal }),
 
   /** Recursively computed size + counts for a single directory (or file). */
-  dirSize: (path: string) =>
-    request<Usage>(`/dirsize?path=${encodeURIComponent(path)}`),
+  dirSize: (path: string, signal?: AbortSignal) =>
+    request<Usage>(`/dirsize?path=${encodeURIComponent(path)}`, { signal }),
 
   list: (path: string) =>
     request<Listing>(`/files?path=${encodeURIComponent(path)}`),
@@ -140,16 +148,16 @@ export const api = {
 
   /**
    * Upload one or more files into the given directory. Uses XHR (not fetch) so
-   * we can surface real upload progress to the UI.
+   * we can surface real upload progress to the UI. The server streams each file
+   * straight to disk, so the request completes right after the last byte.
    */
   upload(dir: string, files: FileList | File[], onProgress?: ProgressFn): Promise<void> {
     return new Promise((resolve, reject) => {
       const form = new FormData()
-      form.append('path', dir)
       for (const f of Array.from(files)) form.append('files', f)
 
       const xhr = new XMLHttpRequest()
-      xhr.open('POST', '/api/v1/upload')
+      xhr.open('POST', `/api/v1/upload?path=${encodeURIComponent(dir)}`)
       xhr.setRequestHeader('Authorization', `Bearer ${getToken()}`)
 
       xhr.upload.onprogress = (e) => {
